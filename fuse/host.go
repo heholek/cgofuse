@@ -219,9 +219,21 @@ func hostOpen(path0 *c_char, fi0 *c_struct_fuse_file_info) (errc0 c_int) {
 	defer recoverAsErrno(&errc0)
 	fsop := hostHandleGet(c_fuse_get_context().private_data).fsop
 	path := c_GoString(path0)
-	errc, rslt := fsop.Open(path, int(fi0.flags))
-	fi0.fh = c_uint64_t(rslt)
-	return c_int(errc)
+	intf, ok := fsop.(FileSystemOpenEx)
+	if ok {
+		fi := FileInfo_t{Flags: int(fi0.flags)}
+		errc := intf.OpenEx(path, &fi)
+		c_hostAsgnCfileinfo(fi0,
+			c_bool(fi.DirectIo),
+			c_bool(fi.KeepCache),
+			c_bool(fi.NonSeekable),
+			c_uint64_t(fi.Fh))
+		return c_int(errc)
+	} else {
+		errc, rslt := fsop.Open(path, int(fi0.flags))
+		fi0.fh = c_uint64_t(rslt)
+		return c_int(errc)
+	}
 }
 
 func hostRead(path0 *c_char, buff0 *c_char, size0 c_size_t, ofst0 c_fuse_off_t,
@@ -354,12 +366,27 @@ func hostOpendir(path0 *c_char, fi0 *c_struct_fuse_file_info) (errc0 c_int) {
 	defer recoverAsErrno(&errc0)
 	fsop := hostHandleGet(c_fuse_get_context().private_data).fsop
 	path := c_GoString(path0)
-	errc, rslt := fsop.Opendir(path)
-	if -ENOSYS == errc {
-		errc = 0
+	intf, ok := fsop.(FileSystemOpendirEx)
+	if ok {
+		fi := FileInfo_t{Flags: int(fi0.flags)}
+		errc := intf.OpendirEx(path, &fi)
+		if -ENOSYS == errc {
+			errc = 0
+		}
+		c_hostAsgnCfileinfo(fi0,
+			c_bool(fi.DirectIo),
+			c_bool(fi.KeepCache),
+			c_bool(fi.NonSeekable),
+			c_uint64_t(fi.Fh))
+		return c_int(errc)
+	} else {
+		errc, rslt := fsop.Opendir(path)
+		if -ENOSYS == errc {
+			errc = 0
+		}
+		fi0.fh = c_uint64_t(rslt)
+		return c_int(errc)
 	}
-	fi0.fh = c_uint64_t(rslt)
-	return c_int(errc)
 }
 
 func hostReaddir(path0 *c_char, buff0 unsafe.Pointer, fill0 c_fuse_fill_dir_t, ofst0 c_fuse_off_t,
@@ -447,15 +474,33 @@ func hostCreate(path0 *c_char, mode0 c_fuse_mode_t, fi0 *c_struct_fuse_file_info
 	defer recoverAsErrno(&errc0)
 	fsop := hostHandleGet(c_fuse_get_context().private_data).fsop
 	path := c_GoString(path0)
-	errc, rslt := fsop.Create(path, int(fi0.flags), uint32(mode0))
-	if -ENOSYS == errc {
-		errc = fsop.Mknod(path, S_IFREG|uint32(mode0), 0)
-		if 0 == errc {
-			errc, rslt = fsop.Open(path, int(fi0.flags))
+	intf, ok := fsop.(FileSystemOpenEx)
+	if ok {
+		fi := FileInfo_t{Flags: int(fi0.flags)}
+		errc := intf.CreateEx(path, uint32(mode0), &fi)
+		if -ENOSYS == errc {
+			errc = fsop.Mknod(path, S_IFREG|uint32(mode0), 0)
+			if 0 == errc {
+				errc = intf.OpenEx(path, &fi)
+			}
 		}
+		c_hostAsgnCfileinfo(fi0,
+			c_bool(fi.DirectIo),
+			c_bool(fi.KeepCache),
+			c_bool(fi.NonSeekable),
+			c_uint64_t(fi.Fh))
+		return c_int(errc)
+	} else {
+		errc, rslt := fsop.Create(path, int(fi0.flags), uint32(mode0))
+		if -ENOSYS == errc {
+			errc = fsop.Mknod(path, S_IFREG|uint32(mode0), 0)
+			if 0 == errc {
+				errc, rslt = fsop.Open(path, int(fi0.flags))
+			}
+		}
+		fi0.fh = c_uint64_t(rslt)
+		return c_int(errc)
 	}
-	fi0.fh = c_uint64_t(rslt)
-	return c_int(errc)
 }
 
 func hostFtruncate(path0 *c_char, size0 c_fuse_off_t, fi0 *c_struct_fuse_file_info) (errc0 c_int) {
